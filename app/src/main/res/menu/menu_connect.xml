@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item android:title="@string/secure_connect"
+        android:icon="@drawable/ic_bluetooth_black_24dp"
+        android:id="@+id/menu_secure_scan"/>
+
+    <item android:title="@string/insecure_connect"
+        android:icon="@drawable/ic_bluetooth_black_24dp"
+        android:id="@+id/menu_insecure_scan"/>
+
+    <item android:title="@string/discoverable"
+        android:icon="@drawable/ic_bluetooth_black_24dp"
+        android:id="@+id/menu_discover"/>
+
+</menu>
