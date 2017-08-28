@@ -1,8 +1,5 @@
 package com.example.tmha.testbluetooth;
 
-/**
- * Created by tmha on 8/27/2017.
- */
 
 public class Constants {
 
@@ -16,4 +13,8 @@ public class Constants {
     // Key names received from the BluetoothChatService Handler
     public static final String DEVICE_NAME = "device_name";
     public static final String TOAST = "toast";
+
+
+    public static final String TYPE_SEND_MESSAGE = "message";
+    public static final int TYPE_SEND_IMAGE   = 1;
 }

@@ -4,9 +4,17 @@ import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -14,40 +22,42 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
 
-    // Intent request codes
     private static final int REQUEST_CONNECT_DEVICE_SECURE = 1;
     private static final int REQUEST_CONNECT_DEVICE_INSECURE = 2;
     private static final int REQUEST_ENABLE_BT = 3;
+    private static final int REQUEST_CODE_FOLDER = 111;
 
-    // Layout Views
+    private final int PERMISSIONS_REQUEST_READ_EXTERNAL = 123;
+
+    private boolean isConnected;
+
     private ListView mListViewChat;
     private EditText mEdtChat;
-    private Button mBtnSend;
+    private ImageButton mBtnSend;
 
-    /**
-     * Name of the connected device
-     */
     private String mConnectedDeviceName = null;
 
-    /**
-     * Array adapter for the conversation thread
-     */
-    private ArrayAdapter<String> mChatArrayAdapter;
+    //private ArrayAdapter<String> mChatArrayAdapter;
 
-    /**
-     * String buffer for outgoing messages
-     */
+    private List<Chat> mListChat;
+    private ChatAdapter mChatAdapter;
+
     private StringBuffer mOutStringBuffer;
 
     private BluetoothAdapter mBluetoothAdapter = null;
@@ -64,7 +74,9 @@ public class MainActivity extends AppCompatActivity {
     private void initView() {
         mListViewChat = (ListView)findViewById(R.id.list_view_chat);
         mEdtChat = (EditText)findViewById(R.id.edt_chat);
-        mBtnSend = (Button)findViewById(R.id.btn_send);
+        mBtnSend = (ImageButton)findViewById(R.id.ibt_send);
+
+        mListChat = new ArrayList<>();
 
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
@@ -104,16 +116,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * Set up the UI and background operations for chat.
-     */
     private void setupChat() {
         Log.d(TAG, "setupChat()");
 
         // Initialize the array adapter for the conversation thread
-        mChatArrayAdapter = new ArrayAdapter<String>(this, R.layout.message);
+        //mChatArrayAdapter = new ArrayAdapter<String>(this, R.layout.message);
 
-        mListViewChat.setAdapter(mChatArrayAdapter);
+        mChatAdapter = new ChatAdapter(this, R.layout.item_chat, mListChat);
+
+        mListViewChat.setAdapter(mChatAdapter);
 
         // Initialize the compose field with a listener for the return key
         mEdtChat.setOnEditorActionListener(mWriteListener);
@@ -123,7 +134,7 @@ public class MainActivity extends AppCompatActivity {
         mBtnSend.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 // Send a message using content of the edit text widget
-                    String message = mEdtChat.getText().toString();
+                    String message = Constants.TYPE_SEND_MESSAGE + mEdtChat.getText().toString();
                     sendMessage(message);
             }
         });
@@ -160,22 +171,16 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Check that there's actually something to send
         if (message.length() > 0) {
-            // Get the message bytes and tell the BluetoothChatService to write
             byte[] send = message.getBytes();
             mChatService.write(send);
-
-            // Reset out string buffer to zero and clear the edit text field
             mOutStringBuffer.setLength(0);
             mEdtChat.setText(mOutStringBuffer);
         }
     }
 
 
-    /**
-     * The Handler that gets information back from the BluetoothChatService
-     */
+
     private final Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
@@ -183,14 +188,19 @@ public class MainActivity extends AppCompatActivity {
                 case Constants.MESSAGE_STATE_CHANGE:
                     switch (msg.arg1) {
                         case BluetoothChatService.STATE_CONNECTED:
+                            isConnected = true;
                             setStatus(getString(R.string.title_connected_to, mConnectedDeviceName));
-                            mChatArrayAdapter.clear();
+                            mListChat.clear();
                             break;
                         case BluetoothChatService.STATE_CONNECTING:
+                            isConnected = false;
                             setStatus(R.string.title_connecting);
                             break;
                         case BluetoothChatService.STATE_LISTEN:
+                            isConnected = false;
+                            break;
                         case BluetoothChatService.STATE_NONE:
+                            isConnected = false;
                             setStatus(R.string.title_not_connected);
                             break;
                     }
@@ -198,14 +208,34 @@ public class MainActivity extends AppCompatActivity {
                 case Constants.MESSAGE_WRITE:
                     byte[] writeBuf = (byte[]) msg.obj;
                     // construct a string from the buffer
-                    String writeMessage = new String(writeBuf);
-                    mChatArrayAdapter.add("Me:  " + writeMessage);
+                    String writeData = new String(writeBuf);
+                    String typeWrite = writeData.substring(0, 7);
+                    if(typeWrite.equals(Constants.TYPE_SEND_MESSAGE)){
+                        writeData = writeData.substring(7);
+                        String message = "Me" + ":  "  + writeData;
+                        mListChat.add(new Chat(message, null));
+                    }else {
+                        String message = "Me" + ":  ";
+                        mListChat.add(new Chat(message, writeBuf));
+                    }
+                    mChatAdapter.notifyDataSetChanged();
                     break;
                 case Constants.MESSAGE_READ:
                     byte[] readBuf = (byte[]) msg.obj;
                     // construct a string from the valid bytes in the buffer
-                    String readMessage = new String(readBuf, 0, msg.arg1);
-                    mChatArrayAdapter.add(mConnectedDeviceName + ":  " + readMessage);
+//                    String readMessage = new String(readBuf, 0, msg.arg1);
+//                    mChatArrayAdapter.add(mConnectedDeviceName + ":  " + readMessage);
+                    String readData =new String(readBuf);
+                    String typeRead = readData.substring(0, 7);
+                    if(typeRead.equals(Constants.TYPE_SEND_MESSAGE)){
+                        readData = readData.substring(7);
+                        String message = mConnectedDeviceName + ":  "  + readData;
+                        mListChat.add(new Chat(message, null));
+                    }else {
+                        String message = mConnectedDeviceName + ":  ";
+                        mListChat.add(new Chat(message, readBuf));
+                    }
+                    mChatAdapter.notifyDataSetChanged();
                     break;
                 case Constants.MESSAGE_DEVICE_NAME:
                     // save the connected device's name
@@ -236,11 +266,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    /**
-     * Updates the status on the action bar.
-     *
-     * @param subTitle status
-     */
     private void setStatus(CharSequence subTitle) {
         final android.support.v7.app.ActionBar actionBar = getSupportActionBar();
         if (null == actionBar) {
@@ -250,15 +275,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    /**
-     * The action listener for the EditText widget, to listen for the return key
-     */
     private TextView.OnEditorActionListener mWriteListener
             = new TextView.OnEditorActionListener() {
         public boolean onEditorAction(TextView view, int actionId, KeyEvent event) {
             // If the action is a key-up event on the return key, send the message
             if (actionId == EditorInfo.IME_NULL && event.getAction() == KeyEvent.ACTION_UP) {
-                String message = view.getText().toString();
+                String message = Constants.TYPE_SEND_MESSAGE + view.getText().toString();
                 sendMessage(message);
             }
             return true;
@@ -275,25 +297,86 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.menu_secure_scan: {
-                // Launch the DeviceListActivity to see devices and do scan
                 Intent serverIntent = new Intent(this, DeviceListActivity.class);
                 startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE_SECURE);
                 return true;
             }
             case R.id.menu_insecure_scan: {
-                // Launch the DeviceListActivity to see devices and do scan
                 Intent serverIntent = new Intent(this, DeviceListActivity.class);
                 startActivityForResult(serverIntent, REQUEST_CONNECT_DEVICE_INSECURE);
                 return true;
             }
             case R.id.menu_discover: {
-                // Ensure this device is discoverable by others
                 ensureDiscoverable();
                 return true;
             }
+
+            case R.id.menu_add_file: {
+                // Check that we're actually connected before trying anything
+                if (mChatService.getState() != BluetoothChatService.STATE_CONNECTED) {
+                    Toast.makeText(this, R.string.not_connected, Toast.LENGTH_SHORT).show();
+                }else {
+                    selectImage();
+                }
+                return true;
+            }
+
         }
         return false;
     }
+
+    private void selectImage() {
+        if (Build.VERSION.SDK_INT >= 23) {
+            // Here, thisActivity is the current activity
+            if (ContextCompat.checkSelfPermission(MainActivity.this,
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+
+                // Should we show an explanation?
+                if (ActivityCompat.shouldShowRequestPermissionRationale(MainActivity.this,
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE)) {
+
+                } else {
+
+                    // No explanation needed, we can request the permission.
+
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE},
+                            PERMISSIONS_REQUEST_READ_EXTERNAL);
+
+                }
+            } else {
+                ActivityCompat.requestPermissions(MainActivity.this,
+                        new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE},
+                        PERMISSIONS_REQUEST_READ_EXTERNAL);
+            }
+        } else {
+
+            Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
+            photoPickerIntent.setType("image/*");
+            startActivityForResult(photoPickerIntent, REQUEST_CODE_FOLDER);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSIONS_REQUEST_READ_EXTERNAL ){
+            // If request is cancelled, the result arrays are empty.
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                // permission was granted, yay! Do the
+                // contacts-related task you need to do.
+                Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
+                photoPickerIntent.setType("image/*");
+                startActivityForResult(photoPickerIntent, REQUEST_CODE_FOLDER);
+            }
+        }
+    }
+
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -317,29 +400,54 @@ public class MainActivity extends AppCompatActivity {
                     // Bluetooth is now enabled, so set up a chat session
                     setupChat();
                 } else {
-                    // User did not enable Bluetooth or an error occurred
-                    Log.d(TAG, "BT not enabled");
+                    Log.d(TAG, "Bluetooth not enabled");
                     Toast.makeText(this, R.string.bt_not_enabled_leaving,
                             Toast.LENGTH_SHORT).show();
                     finish();
                 }
+                break;
+
+            case REQUEST_CODE_FOLDER:
+                if(requestCode == REQUEST_CODE_FOLDER
+                        && resultCode == RESULT_OK
+                        && data != null){
+                    Uri uri = data.getData();
+                    //get real path from uri
+//                    mCurrentPhotoPath = "file:" + getRealPathFromURI(uri);
+                    try {
+                        InputStream inputStream = getContentResolver()
+                            .openInputStream(uri);
+                        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
+                        byte[] byteArray = stream.toByteArray();
+                        mChatService.write(byteArray);
+
+//                        mBitmap = MediaStore.Images.Media
+//                                .getBitmap(getContentResolver(),
+//                                        Uri.parse(mCurrentPhotoPath));
+//                        mImgProject.setImageBitmap(mBitmap);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
+                }
+                break;
         }
 
     }
 
-    /**
-     * Establish connection with other device
-     *
-     * @param data
-     * @param secure
-     */
+    private void getFile() {
+
+    }
+
     private void connectDevice(Intent data, boolean secure) {
         // Get the device MAC address
         String address = data.getExtras()
                 .getString(DeviceListActivity.EXTRA_DEVICE_ADDRESS);
         // Get the BluetoothDevice object
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
-        // Attempt to connect to the device
+
         mChatService.connect(device, secure);
     }
 

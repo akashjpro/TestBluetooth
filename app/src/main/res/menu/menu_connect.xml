@@ -3,6 +3,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item android:title="@string/secure_connect"
+        android:icon="@drawable/ic_attach_file_black_24dp"
+        app:showAsAction="ifRoom"
+        android:id="@+id/menu_add_file"/>
+
+    <item android:title="@string/secure_connect"
         android:icon="@drawable/ic_bluetooth_black_24dp"
         android:id="@+id/menu_secure_scan"/>
 

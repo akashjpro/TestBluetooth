@@ -43,7 +43,7 @@ public class BluetoothChatService {
     public static final int STATE_NONE = 0;       // we're doing nothing
     public static final int STATE_LISTEN = 1;     // now listening for incoming connections
     public static final int STATE_CONNECTING = 2; // now initiating an outgoing connection
-    public static final int STATE_CONNECTED = 3;  //
+    public static final int STATE_CONNECTED  = 3;  //
 
 
     public BluetoothChatService(Context context, Handler mHandler) {
@@ -202,10 +202,8 @@ public class BluetoothChatService {
     }
 
     /**
-     * Write to the ConnectedThread in an unsynchronized manner
      *
-     * @param out The bytes to write
-     * @see ConnectedThread#write(byte[])
+     * @param out
      */
     public void write(byte[] out) {
         // Create temporary object
@@ -259,11 +257,6 @@ public class BluetoothChatService {
     }
 
 
-    /**
-     * This thread runs while listening for incoming connections. It behaves
-     * like a server-side client. It runs until a connection is accepted
-     * (or until cancelled).
-     */
     private class AcceptThread extends Thread {
         // The local server socket
         private final BluetoothServerSocket mmServerSocket;
@@ -344,11 +337,6 @@ public class BluetoothChatService {
         }
     }
 
-    /**
-     * This thread runs while attempting to make an outgoing connection
-     * with a device. It runs straight through; the connection either
-     * succeeds or fails.
-     */
     private class ConnectThread extends Thread {
         private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
@@ -449,7 +437,7 @@ public class BluetoothChatService {
 
         public void run() {
             Log.i(TAG, "BEGIN mConnectedThread");
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[7340];
             int bytes;
 
             // Keep listening to the InputStream while connected
@@ -477,7 +465,7 @@ public class BluetoothChatService {
         public void write(byte[] buffer) {
             try {
                 mmOutStream.write(buffer);
-
+                mmOutStream.flush();
                 // Share the sent message back to the UI Activity
                 mHandler.obtainMessage(Constants.MESSAGE_WRITE, -1, -1, buffer)
                         .sendToTarget();
