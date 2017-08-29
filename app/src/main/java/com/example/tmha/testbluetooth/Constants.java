@@ -16,5 +16,4 @@ public class Constants {
 
 
     public static final String TYPE_SEND_MESSAGE = "message";
-    public static final int TYPE_SEND_IMAGE   = 1;
 }

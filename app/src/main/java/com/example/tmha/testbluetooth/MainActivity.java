@@ -1,19 +1,23 @@
 package com.example.tmha.testbluetooth;
 
+import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.content.ContentUris;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.content.pm.ResolveInfo;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
-import android.support.annotation.NonNull;
-import android.support.v4.app.ActivityCompat;
+import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -28,9 +32,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final int PERMISSIONS_REQUEST_READ_EXTERNAL = 123;
 
-    private boolean isConnected;
+    private boolean isSendFile;
 
     private ListView mListViewChat;
     private EditText mEdtChat;
@@ -64,11 +66,31 @@ public class MainActivity extends AppCompatActivity {
 
     private BluetoothChatService mChatService = null;
 
+
+    private static final String[] INITIAL_PERMS = {Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION};
+
+    private static final int REQUEST_PERMS = 1337;
+    private static final int DISCOVER_DURATION = 300;
+    private static final int REQUEST_DISCOVERABLE = 11;
+
+    private  String mPath;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initView();
+        if (!canAccessLocation() || !canAccessCamera() || !canAccessWriteStorage() || !canAccessReadStorage() ||
+                !canAccessReadContacts() || !canAccessWriteContacts()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                requestPermissions(INITIAL_PERMS, REQUEST_PERMS);
+            }
+        }
     }
 
     private void initView() {
@@ -134,8 +156,15 @@ public class MainActivity extends AppCompatActivity {
         mBtnSend.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 // Send a message using content of the edit text widget
-                    String message = Constants.TYPE_SEND_MESSAGE + mEdtChat.getText().toString();
+                if (!isSendFile){
+                    String message = mEdtChat.getText().toString();
                     sendMessage(message);
+                }else {
+                    sendViaBluetooth();
+                    mOutStringBuffer.setLength(0);
+                    mEdtChat.setText(mOutStringBuffer);
+                }
+                isSendFile = false;
             }
         });
 
@@ -188,53 +217,31 @@ public class MainActivity extends AppCompatActivity {
                 case Constants.MESSAGE_STATE_CHANGE:
                     switch (msg.arg1) {
                         case BluetoothChatService.STATE_CONNECTED:
-                            isConnected = true;
                             setStatus(getString(R.string.title_connected_to, mConnectedDeviceName));
                             mListChat.clear();
                             break;
                         case BluetoothChatService.STATE_CONNECTING:
-                            isConnected = false;
                             setStatus(R.string.title_connecting);
                             break;
                         case BluetoothChatService.STATE_LISTEN:
-                            isConnected = false;
                             break;
                         case BluetoothChatService.STATE_NONE:
-                            isConnected = false;
                             setStatus(R.string.title_not_connected);
                             break;
                     }
                     break;
                 case Constants.MESSAGE_WRITE:
                     byte[] writeBuf = (byte[]) msg.obj;
-                    // construct a string from the buffer
                     String writeData = new String(writeBuf);
-                    String typeWrite = writeData.substring(0, 7);
-                    if(typeWrite.equals(Constants.TYPE_SEND_MESSAGE)){
-                        writeData = writeData.substring(7);
-                        String message = "Me" + ":  "  + writeData;
-                        mListChat.add(new Chat(message, null));
-                    }else {
-                        String message = "Me" + ":  ";
-                        mListChat.add(new Chat(message, writeBuf));
-                    }
+                    String message = "Me" + ":  "  + writeData;
+                    mListChat.add(new Chat(message, null));
                     mChatAdapter.notifyDataSetChanged();
                     break;
                 case Constants.MESSAGE_READ:
                     byte[] readBuf = (byte[]) msg.obj;
-                    // construct a string from the valid bytes in the buffer
-//                    String readMessage = new String(readBuf, 0, msg.arg1);
-//                    mChatArrayAdapter.add(mConnectedDeviceName + ":  " + readMessage);
                     String readData =new String(readBuf);
-                    String typeRead = readData.substring(0, 7);
-                    if(typeRead.equals(Constants.TYPE_SEND_MESSAGE)){
-                        readData = readData.substring(7);
-                        String message = mConnectedDeviceName + ":  "  + readData;
-                        mListChat.add(new Chat(message, null));
-                    }else {
-                        String message = mConnectedDeviceName + ":  ";
-                        mListChat.add(new Chat(message, readBuf));
-                    }
+                    String readMessage = mConnectedDeviceName + ":  "  + readData;
+                    mListChat.add(new Chat(readMessage, null));
                     mChatAdapter.notifyDataSetChanged();
                     break;
                 case Constants.MESSAGE_DEVICE_NAME:
@@ -312,12 +319,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             case R.id.menu_add_file: {
-                // Check that we're actually connected before trying anything
-                if (mChatService.getState() != BluetoothChatService.STATE_CONNECTED) {
-                    Toast.makeText(this, R.string.not_connected, Toast.LENGTH_SHORT).show();
-                }else {
-                    selectImage();
-                }
+                getFile();
+                isSendFile = true;
                 return true;
             }
 
@@ -325,58 +328,48 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    private void selectImage() {
-        if (Build.VERSION.SDK_INT >= 23) {
-            // Here, thisActivity is the current activity
-            if (ContextCompat.checkSelfPermission(MainActivity.this,
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE)
-                    != PackageManager.PERMISSION_GRANTED) {
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
 
-                // Should we show an explanation?
-                if (ActivityCompat.shouldShowRequestPermissionRationale(MainActivity.this,
-                        android.Manifest.permission.READ_EXTERNAL_STORAGE)) {
+        switch (requestCode) {
+
+            case REQUEST_PERMS:
+                if (canAccessWriteStorage()) {
+                    //reload my activity with permission granted or use the features what required the permission
+                    System.out.println("permission grantedddd");
 
                 } else {
-
-                    // No explanation needed, we can request the permission.
-
-                    ActivityCompat.requestPermissions(MainActivity.this,
-                            new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE},
-                            PERMISSIONS_REQUEST_READ_EXTERNAL);
-
+                    Toast.makeText(this, "The app was not allowed to write to your storage. Hence, it cannot function properly. Please consider granting it this permission", Toast.LENGTH_LONG).show();
                 }
-            } else {
-                ActivityCompat.requestPermissions(MainActivity.this,
-                        new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE},
-                        PERMISSIONS_REQUEST_READ_EXTERNAL);
-            }
+                break;
+        }
+    }
+
+
+    public void sendViaBluetooth() {
+        if (mPath == null) {
+            Toast.makeText(this, "Please select file", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (mBluetoothAdapter == null) {
+            Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_LONG).show();
         } else {
-
-            Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
-            photoPickerIntent.setType("image/*");
-            startActivityForResult(photoPickerIntent, REQUEST_CODE_FOLDER);
+            enableBluetooth();
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSIONS_REQUEST_READ_EXTERNAL ){
-            // If request is cancelled, the result arrays are empty.
-            if (grantResults.length > 0
-                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-
-                // permission was granted, yay! Do the
-                // contacts-related task you need to do.
-                Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
-                photoPickerIntent.setType("image/*");
-                startActivityForResult(photoPickerIntent, REQUEST_CODE_FOLDER);
-            }
-        }
+    public void getFile() {
+        Intent mediaIntent = new Intent(Intent.ACTION_GET_CONTENT);
+        mediaIntent.setType("*/*"); //set type is all file
+        startActivityForResult(mediaIntent, REQUEST_CODE_FOLDER);
     }
 
+    public void enableBluetooth() {
+        Intent discoveryIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+        discoveryIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, DISCOVER_DURATION);
+        startActivityForResult(discoveryIntent, REQUEST_DISCOVERABLE);
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -408,38 +401,56 @@ public class MainActivity extends AppCompatActivity {
                 break;
 
             case REQUEST_CODE_FOLDER:
-                if(requestCode == REQUEST_CODE_FOLDER
-                        && resultCode == RESULT_OK
+                if(resultCode == RESULT_OK
                         && data != null){
-                    Uri uri = data.getData();
-                    //get real path from uri
-//                    mCurrentPhotoPath = "file:" + getRealPathFromURI(uri);
-                    try {
-                        InputStream inputStream = getContentResolver()
-                            .openInputStream(uri);
-                        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                        ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
-                        byte[] byteArray = stream.toByteArray();
-                        mChatService.write(byteArray);
+                    Uri uriPath = data.getData();
+                    mPath = getPath(this, uriPath);
+                    mListChat.add(new Chat(mPath, null));
+                    mChatAdapter.notifyDataSetChanged();
+                    mEdtChat.setText(mPath);
+                }
+                break;
 
-//                        mBitmap = MediaStore.Images.Media
-//                                .getBitmap(getContentResolver(),
-//                                        Uri.parse(mCurrentPhotoPath));
-//                        mImgProject.setImageBitmap(mBitmap);
-                    } catch (IOException e) {
-                        e.printStackTrace();
+            case REQUEST_DISCOVERABLE:
+                if(resultCode == DISCOVER_DURATION){
+                    Intent intent = new Intent();
+                    intent.setAction(Intent.ACTION_SEND);
+                    intent.setType("*/*");
+
+                    File f = new File(mPath);
+                    intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(f));
+
+                    PackageManager pm = getPackageManager();
+                    List<ResolveInfo> appsList = pm.queryIntentActivities(intent, 0);
+
+                    if (appsList.size() > 0) {
+                        String packageName = null;
+                        String className = null;
+                        boolean found = false;
+
+                        for (ResolveInfo info : appsList) {
+                            packageName = info.activityInfo.packageName;
+                            if (packageName.equals("com.android.bluetooth")) {
+                                className = info.activityInfo.name;
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found) {
+                            Toast.makeText(this, "Bluetooth haven't been found",
+                                    Toast.LENGTH_LONG).show();
+                        } else {
+                            intent.setClassName(packageName, className);
+                            startActivity(intent);
+                        }
                     }
-
                 }
                 break;
         }
 
     }
 
-    private void getFile() {
-
-    }
 
     private void connectDevice(Intent data, boolean secure) {
         // Get the device MAC address
@@ -449,6 +460,159 @@ public class MainActivity extends AppCompatActivity {
         BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
 
         mChatService.connect(device, secure);
+    }
+
+
+
+    /**
+     * Permission Get file ======================================================
+     */
+
+    private boolean canAccessWriteStorage() {
+        return (hasPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE));
+    }
+
+    private boolean canAccessReadStorage() {
+        return (hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE));
+    }
+
+    private boolean canAccessReadContacts() {
+        return (hasPermission(Manifest.permission.READ_CONTACTS));
+    }
+
+    private boolean canAccessWriteContacts() {
+        return (hasPermission(Manifest.permission.WRITE_CONTACTS));
+    }
+
+    private boolean canAccessCamera() {
+        return (hasPermission(Manifest.permission.CAMERA));
+    }
+
+    private boolean canAccessLocation() {
+        return (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION));
+    }
+
+    private boolean hasPermission(String perm) {
+        return (PackageManager.PERMISSION_GRANTED == ContextCompat.checkSelfPermission(this, perm));
+    }
+
+    public static String getPath(final Context context, final Uri uri) {
+        final boolean isKitKatOrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
+
+        // DocumentProvider
+        if (isKitKatOrAbove && DocumentsContract.isDocumentUri(context, uri)) {
+            // ExternalStorageProvider
+            if (isExternalStorageDocument(uri)) {
+                final String docId = DocumentsContract.getDocumentId(uri);
+                final String[] split = docId.split(":");
+                final String type = split[0];
+
+                if ("primary".equalsIgnoreCase(type)) {
+                    return Environment.getExternalStorageDirectory() + "/" + split[1];
+                }
+
+                // TODO handle non-primary volumes
+            }
+            // DownloadsProvider
+            else if (isDownloadsDocument(uri)) {
+
+                final String id = DocumentsContract.getDocumentId(uri);
+                final Uri contentUri = ContentUris.withAppendedId(
+                        Uri.parse("content://downloads/public_downloads"), Long.valueOf(id));
+
+                return getDataColumn(context, contentUri, null, null);
+            }
+            // MediaProvider
+            else if (isMediaDocument(uri)) {
+                final String docId = DocumentsContract.getDocumentId(uri);
+                final String[] split = docId.split(":");
+                final String type = split[0];
+
+                Uri contentUri = null;
+                if ("image".equals(type)) {
+                    contentUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                } else if ("video".equals(type)) {
+                    contentUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                } else if ("audio".equals(type)) {
+                    contentUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                }
+
+                final String selection = "_id=?";
+                final String[] selectionArgs = new String[]{
+                        split[1]
+                };
+
+                return getDataColumn(context, contentUri, selection, selectionArgs);
+            }
+        }
+        // MediaStore (and general)
+        else if ("content".equalsIgnoreCase(uri.getScheme())) {
+            return getDataColumn(context, uri, null, null);
+        }
+        // File
+        else if ("file".equalsIgnoreCase(uri.getScheme())) {
+            return uri.getPath();
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the value of the data column for this Uri. This is useful for
+     * MediaStore Uris, and other file-based ContentProviders.
+     *
+     * @param context       The context.
+     * @param uri           The Uri to query.
+     * @param selection     (Optional) Filter used in the query.
+     * @param selectionArgs (Optional) Selection arguments used in the query.
+     * @return The value of the _data column, which is typically a file mPath.
+     */
+    public static String getDataColumn(Context context, Uri uri, String selection,
+                                       String[] selectionArgs) {
+
+        Cursor cursor = null;
+        final String column = "_data";
+        final String[] projection = {
+                column
+        };
+
+        try {
+            cursor = context.getContentResolver().query(uri, projection, selection, selectionArgs,
+                    null);
+            if (cursor != null && cursor.moveToFirst()) {
+                final int column_index = cursor.getColumnIndexOrThrow(column);
+                return cursor.getString(column_index);
+            }
+        } finally {
+            if (cursor != null)
+                cursor.close();
+        }
+        return null;
+    }
+
+
+    /**
+     * @param uri The Uri to check.
+     * @return Whether the Uri authority is ExternalStorageProvider.
+     */
+    public static boolean isExternalStorageDocument(Uri uri) {
+        return "com.android.externalstorage.documents".equals(uri.getAuthority());
+    }
+
+    /**
+     * @param uri The Uri to check.
+     * @return Whether the Uri authority is DownloadsProvider.
+     */
+    public static boolean isDownloadsDocument(Uri uri) {
+        return "com.android.providers.downloads.documents".equals(uri.getAuthority());
+    }
+
+    /**
+     * @param uri The Uri to check.
+     * @return Whether the Uri authority is MediaProvider.
+     */
+    public static boolean isMediaDocument(Uri uri) {
+        return "com.android.providers.media.documents".equals(uri.getAuthority());
     }
 
 

@@ -22,36 +22,31 @@
         </ListView>
 
         <RelativeLayout
-            android:layout_alignParentBottom="true"
             android:id="@+id/relative_bottom"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:layout_alignParentBottom="true">
 
             <EditText
-                android:layout_centerVertical="true"
-                android:layout_toLeftOf="@+id/ibt_send"
                 android:id="@+id/edt_chat"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:layout_toLeftOf="@+id/ibt_send" />
 
 
             <ImageButton
-                android:layout_centerVertical="true"
-                android:layout_alignParentRight="true"
-                android:padding="5dp"
-                android:background="@drawable/background_custom"
-                android:src="@drawable/ic_send_black_24dp"
                 android:id="@+id/ibt_send"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
-
-
-
+                android:layout_height="wrap_content"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/background_custom"
+                android:padding="5dp"
+                android:src="@drawable/ic_send_black_24dp" />
 
 
         </RelativeLayout>
-
 
 
     </RelativeLayout>
