@@ -26,6 +26,8 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
+import android.webkit.MimeTypeMap;
+import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ListView;
@@ -33,6 +35,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -107,6 +112,14 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Bluetooth is not available", Toast.LENGTH_LONG).show();
             finish();
         }
+
+        mListViewChat.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+                String path = mListChat.get(i).getmMessage();
+                openFile(MainActivity.this, path);
+            }
+        });
     }
 
     @Override
@@ -161,8 +174,6 @@ public class MainActivity extends AppCompatActivity {
                     sendMessage(message);
                 }else {
                     sendViaBluetooth();
-                    mOutStringBuffer.setLength(0);
-                    mEdtChat.setText(mOutStringBuffer);
                 }
                 isSendFile = false;
             }
@@ -359,10 +370,62 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Get path any file
+     */
     public void getFile() {
         Intent mediaIntent = new Intent(Intent.ACTION_GET_CONTENT);
         mediaIntent.setType("*/*"); //set type is all file
         startActivityForResult(mediaIntent, REQUEST_CODE_FOLDER);
+    }
+
+    /**
+     * Open any file
+     * @param ctx
+     * @param filepath
+     *
+     */
+    public void openFile(Context ctx,String filepath)
+    {
+        Uri ttt = Uri.parse("file://" + filepath);
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        String arr[] = filepath.split("\\.");
+        MimeTypeMap myMime = MimeTypeMap.getSingleton();
+        String mimeType = myMime.getMimeTypeFromExtension(arr[arr.length - 1]);
+        intent.setDataAndType(ttt, mimeType);
+        ctx.startActivity(intent);
+    }
+
+
+    private byte[] convertFileToBytes(String path){
+        File file = new File(path);
+        byte[] bytesArray = new byte[(int) file.length()];
+
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(file);
+            fis.read(bytesArray); //read file into bytes[]
+            fis.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return bytesArray;
+    }
+
+
+    private String getFileName(String pathFile) {
+        try {
+            int index = pathFile.lastIndexOf("/");
+            String result = pathFile.substring(index + 1);
+            return result;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return null;
     }
 
     public void enableBluetooth() {
@@ -405,7 +468,7 @@ public class MainActivity extends AppCompatActivity {
                         && data != null){
                     Uri uriPath = data.getData();
                     mPath = getPath(this, uriPath);
-                    mListChat.add(new Chat(mPath, null));
+                    mListChat.add(new Chat(mPath, convertFileToBytes(mPath)));
                     mChatAdapter.notifyDataSetChanged();
                     mEdtChat.setText(mPath);
                 }
